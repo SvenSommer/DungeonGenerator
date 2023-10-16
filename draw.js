@@ -12,7 +12,9 @@ class Card {
         this.players.push(player);
         if (this.monsters.length > 0 && this.battleCallback) {
             this.battleCallback(player, this.monsters, this);
-            console.log("Kampf trigger!")
+        }
+        if (this.cardType == "Heilungsraum") {
+            player.restoreHealth();
         }
     }
 
@@ -45,10 +47,11 @@ class Treasure {
 
 
 class Player {
-    constructor(id, name, healthPoints, hitPoints, maxSteps, x, y) {
+    constructor(id, name, maxHealthPoints, hitPoints, maxSteps, x, y) {
         this.id = id;
         this.name = name;
-        this.healthPoints = healthPoints
+        this.healthPoints = maxHealthPoints
+        this.maxHealthPoints = maxHealthPoints
         this.hitPoints = hitPoints;
         this.maxSteps = maxSteps
         this.treasure = [];
@@ -56,12 +59,15 @@ class Player {
         this.y = y;
         this.width = 20;
         this.height = 20;
-        // Weitere Eigenschaften...
     }
     addTreasure(treasure) {
         this.treasure.push(treasure)
         if (treasure.weapon)
-        this.hitPoints += treasure.hitPoints;
+            this.hitPoints += treasure.hitPoints;
+    }
+
+    restoreHealth() {
+        this.healthPoints = this.maxHealthPoints;
     }
 }
 
@@ -80,9 +86,45 @@ class Monster {
     // Methoden...
 }
 
+class LogRenderer {
+    constructor(context, x, y, width, height, maxMessages = 5) {
+        this.context = context;
+        this.x = x;
+        this.y = y;
+        this.width = width;
+        this.height = height;
+        this.maxMessages = maxMessages;
+        this.messages = [];
+    }
+
+    addMessage(message) {
+        this.messages.push(message);
+        if (this.messages.length > this.maxMessages) {
+            this.messages.shift(); // Älteste Nachricht entfernen
+        }
+        this.draw();
+    }
+
+    draw() {
+        // Grundrahmen für den Log zeichnen
+        this.context.strokeStyle = 'black';
+        this.context.strokeRect(this.x, this.y, this.width, this.height);
+        
+        let offsetY = 20;
+        this.messages.forEach(message => {
+            this.context.fillText(message, this.x + 10, this.y + offsetY);
+            offsetY += 20;
+        });
+    }
+}
+
 class BattleManager {
+    constructor(logRenderer) {
+        this.logRenderer = logRenderer;
+    }
+
     initiateBattle(player, monsters, card) {
-        console.log("Kampf started! Player", player, "monsters", monsters)
+        this.logRenderer.addMessage(player.name  + " kämpft gegen " + monsters[0].name + " (" + monsters[0].hitPoints + ")");
         this.displayBattleDialog(player, monsters, card);
     }
 
@@ -96,7 +138,7 @@ class BattleManager {
 
         // Wenn "Würfeln"-Knopf gedrückt:
         const playerRoll = this.rollDice() + this.rollDice(); // Zwei Würfel werfen
-        console.log("playerRoll", playerRoll)
+        this.logRenderer.addMessage(player.name + " würfelt eine " + playerRoll);
         const monster = monsters[0]; // Nehmen wir das erste Monster für den Kampf.
 
         // Füge die Würfelergebnisse zu den Hitpoints des Spielers hinzu
@@ -106,7 +148,10 @@ class BattleManager {
         if (playerHitPoints > monster.hitPoints) {
             // Der Spieler gewinnt
             this.playerWins(player, monster, card);
-        } else {
+        } else if (playerHitPoints == monster.hitPoints) {
+            this.noWinner(player, monster)
+        } else
+        {
             // Das Monster gewinnt
             this.monsterWins(player, monster);
         }
@@ -120,25 +165,34 @@ class BattleManager {
     playerWins(player, monster, card) {
         // Implementieren Sie die Logik, die ausgeführt wird, wenn der Spieler gewinnt.
         // Zum Beispiel: Monster von der Karte entfernen, Spieler belohnen, etc.
-        console.log("Spieler gewinnt!")
+        this.logRenderer.addMessage(player.name + " gewinnt gegen " + monster.name + " (" + monster.hitPoints + ")" + "!");
         card.removeMonster(monster.id);
+        this.logRenderer.addMessage(player.name + " nimmt " + monster.treasure.name + " auf.");   
         player.addTreasure(monster.treasure)
     }
 
     monsterWins(player, monster) {
         // Implementieren Sie die Logik, die ausgeführt wird, wenn das Monster gewinnt.
         // Zum Beispiel: Spieler-Strafen, Rückkehr zum letzten Speicherpunkt, etc.
-        console.log("Monster gewinnt!")
+        this.logRenderer.addMessage(player.name + " verliert gegen " + monster.name + " (" + monster.hitPoints + ")");
+        this.logRenderer.addMessage(player.name + " verliert einen Lebenspunkt.");   
         player.healthPoints = player.healthPoints -1;
+    }
+
+    noWinner(player, monster){
+        this.logRenderer.addMessage("Kampf mit " + monster.name + " (" + monster.hitPoints + ")" + " endet unentschieden.");
     }
 }
 
-// CARD MANAGER
-class CardManager {
-    constructor(cardFactory, cardRenderer) {
+// World MANAGER
+class WorldManager {
+    constructor(cardFactory, cardRenderer, playerBoardRenderer, logRenderer) {
         this.cardFactory = cardFactory;
         this.cardRenderer = cardRenderer;
+        this.playerBoardRenderer = playerBoardRenderer;
+        this.logRenderer = logRenderer;
         this.placedCards = [];
+        this.players = [];
     }
 
     createRandomCard(type = null, minOpenSides = null) {
@@ -193,7 +247,7 @@ class CardManager {
         } while (!this.cardFitsAt(x, y, newCard) && this.placedCards.length !== 0);
 
         this.placedCards.push({ card: newCard, x, y });
-        this.drawAllCards();
+        this.draw();
     }
 
     addPlayer(x, y, player) {
@@ -205,8 +259,8 @@ class CardManager {
         }
 
         card.card.addPlayer(player, x, y);
-
-        this.drawAllCards();
+        this.players.push(player);
+        this.draw();
     }
 
     getPlayerAtPosition(x, y) {
@@ -296,8 +350,10 @@ class CardManager {
         });
     }
 
-    drawAllCards() {
+    draw() {
         this.cardRenderer.drawAllCards(this.placedCards);
+        this.playerBoardRenderer.drawPlayers(this.players)
+        this.logRenderer.draw()
     }
 }
 
@@ -327,11 +383,11 @@ class MonsterFactory {
 
 // CARD FACTORY
 class CardFactory {
-    constructor(cardTypes, monsterFactory) {
+    constructor(cardTypes, monsterFactory, battleManager) {
         this.cardTypes = cardTypes;
         this.monsterFactory = monsterFactory
         this.validateCardTypes();
-        this.battleManager = new BattleManager();
+        this.battleManager = battleManager
     }
 
     validateCardTypes() {
@@ -385,6 +441,90 @@ class CardFactory {
             newCard.addBattleCallback(battleCallback);
         }
         return newCard;
+    }
+}
+
+class PlayerBoardRenderer {
+    constructor(context, initialX, y, width, height, playerCount) {
+        this.context = context;
+        this.initialX = initialX;
+        this.y = y;
+        this.width = width;
+        this.height = height;
+        this.playerCount = playerCount;
+        this.spacing = 10; // Platz zwischen den Dashboards
+    }
+
+    drawPlayers(players) {
+        players.forEach((player, index) => {
+            // Dynamischer X-Wert basierend auf der Indexposition des Spielers
+            this.x = this.initialX + (this.width + this.spacing) * index;
+            this.draw(player);
+        });
+    }
+
+    draw(player) {
+        // Grundrahmen für das Dashboard zeichnen
+        this.context.strokeStyle = 'black';
+        this.context.strokeRect(this.x, this.y, this.width, this.height);
+        
+        // Name des Spielers
+        this.context.fillText(player.name, this.x + 10, this.y + 20);
+
+        this.showHealthBar(player);
+        // Trefferpunkte
+        this.context.fillText('Schaden: ' + player.hitPoints, this.x + 10, this.y + 60);
+        
+        // Schätze/Items
+        this.showTreasures(player);
+    }
+
+    showHealthBar(player) {
+        const heartUnicode = "❤️";  // Herz-Symbol
+        const skullUnicode = "💀";  // Totenkopf-Symbol
+        const spacingBetweenIcons = 20;  // Abstand zwischen den Symbolen
+
+        for(let i = 0; i < player.maxHealthPoints; i++) {
+            if (i < player.healthPoints) {
+                this.context.fillStyle = 'red';
+                this.context.fillText(heartUnicode, this.x + 10 + (i * spacingBetweenIcons), this.y + 40);
+            } else {
+                this.context.fillStyle = 'black';
+                this.context.fillText(skullUnicode, this.x + 10 + (i * spacingBetweenIcons), this.y + 40);
+            }
+        }
+
+        this.context.fillStyle = 'black';  // Farbe zurücksetzen
+    }
+
+    showTreasures(player) {
+        const treasuresMapping = {
+            "Schatz": "💎",
+            "Axt": "⛏️",
+            "Schwert": "⚔️",
+            "Schlüssel": "🔑",
+            "Flammenzauber": "🔥",
+            "Heilzauber": "🌟",
+            "Dolche": "🗡️"
+        };
+
+        let treasureCounts = {};
+        player.treasure.forEach(item => {
+            if (!treasureCounts[item.name]) {
+                treasureCounts[item.name] = 1;
+            } else {
+                treasureCounts[item.name]++;
+            }
+        });
+
+        let offsetY = 80;
+        Object.keys(treasureCounts).forEach(treasureName => {
+            if (treasuresMapping[treasureName]) {
+                let multiplier = treasureCounts[treasureName] > 1 ? ` x${treasureCounts[treasureName]}` : '';
+                this.context.fillText(treasuresMapping[treasureName] + multiplier, this.x + 10, this.y + offsetY);
+                offsetY += 20;
+            }
+        });
     }
 }
 
@@ -527,9 +667,9 @@ class TooltipHandler {
 
 // EVENT HANDLERS
 class EventHandlers {
-    constructor(canvas, cardManager, tooltipHandler, cardSize) {
+    constructor(canvas, worldManager, tooltipHandler, cardSize) {
         this.canvas = canvas;
-        this.cardManager = cardManager;
+        this.worldManager = worldManager;
         this.tooltipHandler = tooltipHandler;
         this.cardSize = cardSize;
         this.draggingPlayer = null;
@@ -555,8 +695,8 @@ class EventHandlers {
 
     onClick(event) {
         const { x, y } = this.getMousePosition(event);
-        if (this.cardManager && typeof this.cardManager.newCardEvent === 'function') {
-            this.cardManager.newCardEvent(x, y);
+        if (this.worldManager && typeof this.worldManager.newCardEvent === 'function') {
+            this.worldManager.newCardEvent(x, y);
         }
     }
 
@@ -565,17 +705,17 @@ class EventHandlers {
         const { x, y } = this.getMousePosition(event);
         this.draggingPlayer.x = x - this.dragOffset.x;
         this.draggingPlayer.y = y - this.dragOffset.y;
-        this.cardManager.drawAllCards();
+        this.worldManager.draw();
     }
 
     onMouseDown(event) {
         const { x, y } = this.getMousePosition(event);
-        this.draggingPlayer = this.cardManager.getPlayerAtPosition(x, y);
+        this.draggingPlayer = this.worldManager.getPlayerAtPosition(x, y);
         if (this.draggingPlayer) {
             this.draggingPlayerStartState = {
                 x: this.draggingPlayer.x,
                 y: this.draggingPlayer.y,
-                card: this.cardManager.findCardByPlayerId(this.draggingPlayer.id)
+                card: this.worldManager.findCardByPlayerId(this.draggingPlayer.id)
             };
             this.dragOffset = {
                 x: x - this.draggingPlayer.x - 10,
@@ -587,12 +727,12 @@ class EventHandlers {
     onMouseUp(event) {
         if (!this.draggingPlayer) return;
         const { x, y } = this.getMousePosition(event);
-        if (!this.cardManager.placePlayerAtNewPosition(this.draggingPlayer, x, y)) {
+        if (!this.worldManager.placePlayerAtNewPosition(this.draggingPlayer, x, y)) {
             this.rollbackDraggingPlayer();
         }
         this.draggingPlayer = null;
         this.draggingPlayerStartState = null;
-        this.cardManager.drawAllCards();
+        this.worldManager.draw();
     }
 
     getMousePosition(event) {
@@ -608,7 +748,7 @@ class EventHandlers {
             this.draggingPlayer.x = this.draggingPlayerStartState.x;
             this.draggingPlayer.y = this.draggingPlayerStartState.y;
 
-            const currentPlayerCard = this.cardManager.findCardByPlayerId(this.draggingPlayer.id);
+            const currentPlayerCard = this.worldManager.findCardByPlayerId(this.draggingPlayer.id);
             if (currentPlayerCard !== this.draggingPlayerStartState.card) {
                 currentPlayerCard && currentPlayerCard.card.removePlayer(this.draggingPlayer.id);
                 this.draggingPlayerStartState.card.card.addPlayer(this.draggingPlayer);
@@ -646,11 +786,14 @@ document.addEventListener("DOMContentLoaded", () => {
         { type: "Weg", probability: 3 }
     ];
     const monsterFactory = new MonsterFactory(monsterTypes)
-    const cardFactory = new CardFactory(cardTypes, monsterFactory);
+    const logRenderer = new LogRenderer(context, 10,420,410,300,5 );
+    const battleManager = new BattleManager(logRenderer);
+    const cardFactory = new CardFactory(cardTypes, monsterFactory, battleManager);
     const cardRenderer = new CardRenderer(context, canvas, cardSize);
-    const cardManager = new CardManager(cardFactory, cardRenderer);
+    const playerBoardRenderer = new PlayerBoardRenderer(context,  10,10,200,400)
+    const worldManager = new WorldManager(cardFactory, cardRenderer, playerBoardRenderer, logRenderer);
     const tooltipHandler = new TooltipHandler(tooltip, cardSize);
-    const eventHandlers = new EventHandlers(canvas, cardManager, tooltipHandler, cardSize);
+    const eventHandlers = new EventHandlers(canvas, worldManager, tooltipHandler, cardSize);
 
     eventHandlers.attachEventListeners();
     window.addEventListener('resize', resizeCanvas);
@@ -659,14 +802,14 @@ document.addEventListener("DOMContentLoaded", () => {
     function resizeCanvas() {
         canvas.width = window.innerWidth;
         canvas.height = window.innerHeight;
-        cardManager.drawAllCards(); // Ensure this doesn't lead to performance issues
+        worldManager.draw(); // Ensure this doesn't lead to performance issues
     }
 
     // Consider replacing this with a more dynamic approach
-    cardManager.placeNewCard(window.innerWidth / 2, window.innerHeight / 2, "Heilungsraum", 4);
+    worldManager.placeNewCard(window.innerWidth / 2, window.innerHeight / 2, "Heilungsraum", 4);
     const player1 = new Player("p1", "Argentus - der Magier",5, 0, 1,0, 0);
-    //const player2 = new Player("p2", "Horan - der Krieger", 5, 0, 4, 20, 0);
-    cardManager.addPlayer(window.innerWidth / 2, window.innerHeight / 2, player1);
-   // cardManager.addPlayer(window.innerWidth / 2, window.innerHeight / 2, player2);
+    const player2 = new Player("p2", "Horan - der Krieger", 5, 0, 4, 20, 0);
+    worldManager.addPlayer(window.innerWidth / 2, window.innerHeight / 2, player1);
+    worldManager.addPlayer(window.innerWidth / 2, window.innerHeight / 2, player2);
 
 });
